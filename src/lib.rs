@@ -86,6 +86,11 @@ pub mod pallet {
         InsufficientLiquidity,
         ReserveOverflow,
         LiquidityOverflow,
+        InvalidAssetIn,
+        InvalidAssetOut,
+        ArithmeticOverflow,
+        DivisionByZero,
+        InsufficientAmountOut
     }
 
     
