@@ -1,10 +1,9 @@
 use crate as pallet_dex;
 use frame_support::{
-    derive_impl,
-    traits::{AsEnsureOriginWithArg, ConstU128, ConstU16, ConstU32, ConstU64},
+    derive_impl, parameter_types, traits::{AsEnsureOriginWithArg, ConstU128, ConstU16, ConstU32, ConstU64},PalletId
 };
 use frame_system::{EnsureRoot, EnsureSigned};
-use sp_core::H256;
+use sp_core::{Get, H256};
 use sp_runtime::{
     traits::{BlakeTwo256, IdentityLookup},
     BuildStorage,
@@ -90,10 +89,15 @@ impl pallet_assets::Config for Test {
     type BenchmarkHelper = ();
 }
 
+parameter_types! {
+    pub const DexPallet: PalletId = PalletId(*b"POLKADEX");
+}
+
 impl pallet_dex::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type NativeBalance = Balances;
     type Fungibles = Assets;
+    type PalletId= DexPallet;
 }
 
 // Build genesis storage according to the mock runtime.
