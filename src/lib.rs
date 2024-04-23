@@ -115,6 +115,21 @@ pub mod pallet {
             (AssetIdOf<T>, AssetIdOf<T>),
             AssetBalanceOf<T>,
         ),
+
+        
+        
+        
+        
+        
+        
+        
+        Swapped(
+            AccountIdOf<T>,
+            AssetIdOf<T>,
+            AssetBalanceOf<T>,
+            AssetIdOf<T>,
+            AssetBalanceOf<T>,
+        ),
     }
 
     
@@ -167,32 +182,39 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         
-      #[pallet::call_index(0)]
-      #[pallet::weight(Weight::default())]
-      pub fn create_liquidity_pool(
-        origin: OriginFor<T>,
-        asset_a: AssetIdOf<T>,
-        asset_b: AssetIdOf<T>,
-        liquidity_token: AssetIdOf<T>,
-    ) -> DispatchResult {
-        let sender = ensure_signed(origin)?;
-        let trading_pair=(asset_a,asset_b);
-        ensure!(!LiquidityPools::<T>::contains_key(trading_pair),Error::<T>::LiquidityPoolAlreadyExists);
+        #[pallet::call_index(0)]
+        #[pallet::weight(Weight::default())]
+        pub fn create_liquidity_pool(
+            origin: OriginFor<T>,
+            asset_a: AssetIdOf<T>,
+            asset_b: AssetIdOf<T>,
+            liquidity_token: AssetIdOf<T>,
+        ) -> DispatchResult {
+            
+            let sender = ensure_signed(origin)?;
 
-        let pool=LiquidityPool{
-            assets:trading_pair,
-            reserves:(Zero::zero(),Zero::zero()),
-            total_liquidity:Zero::zero(),
-            liquidity_token,
-        };
-        LiquidityPools::<T>::insert(trading_pair,pool);
-        Self::deposit_event(Event::LiquidityPoolCreated(sender, trading_pair));
+            let trading_pair = Self::get_trading_pair(asset_a, asset_b);
+            ensure!(
+                !LiquidityPools::<T>::contains_key(trading_pair),
+                Error::<T>::LiquidityPoolAlreadyExists
+            );
+
+            
+            let liquidity_pool = LiquidityPool {
+                assets: trading_pair,
+                reserves: (Zero::zero(), Zero::zero()),
+                total_liquidity: Zero::zero(),
+                liquidity_token,
+            };
+
+            
+            LiquidityPools::<T>::insert(trading_pair, liquidity_pool);
+
+            
+            Self::deposit_event(Event::LiquidityPoolCreated(sender, trading_pair));
 
             Ok(())
-
         }
-
-
 
         #[pallet::call_index(1)]
         #[pallet::weight(Weight::default())]
@@ -206,7 +228,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            let trading_pair = (asset_a, asset_b);
+            let trading_pair = Self::get_trading_pair(asset_a, asset_b);
 
             
             let mut liquidity_pool =
@@ -261,7 +283,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            let trading_pair = (asset_a, asset_b);
+            let trading_pair = Self::get_trading_pair(asset_a, asset_b);
 
             let mut liquidity_pool =
                 LiquidityPools::<T>::get(trading_pair).ok_or(Error::<T>::LiquidityPoolNotFound)?;
@@ -289,6 +311,36 @@ pub mod pallet {
                 sender,
                 trading_pair,
                 liquidity_burned,
+            ));
+
+            Ok(())
+        }
+
+        #[pallet::call_index(3)]
+        #[pallet::weight(Weight::default())]
+        pub fn swap(
+            origin: OriginFor<T>,
+            asset_in: AssetIdOf<T>,
+            asset_out: AssetIdOf<T>,
+            amount_in: AssetBalanceOf<T>,
+            min_amount_out: AssetBalanceOf<T>,
+        ) -> DispatchResult {
+            let sender = ensure_signed(origin)?;
+
+            let trading_pair = (asset_in, asset_out);
+
+            let mut liquidity_pool =
+                LiquidityPools::<T>::get(trading_pair).ok_or(Error::<T>::LiquidityPoolNotFound)?;
+
+            let amount_out = liquidity_pool.swap(asset_in, amount_in, asset_out, min_amount_out)?;
+
+            Self::transfer_asset_from_user(&sender, asset_in, amount_in)?;
+            Self::transfer_asset_to_user(&sender, asset_out, amount_out)?;
+
+            LiquidityPools::<T>::insert(&trading_pair, liquidity_pool);
+
+            Self::deposit_event(Event::Swapped(
+                sender, asset_in, amount_in, asset_out, amount_out,
             ));
 
             Ok(())
@@ -345,18 +397,20 @@ pub mod pallet {
             Ok(sqrt_product)
         }
 
+        fn pallet_account_id() -> T::AccountId {
+            T::PalletId::get().into_account_truncating()
+        }
+
         fn transfer_asset_to_pool(
             sender: &AccountIdOf<T>,
             asset_id: AssetIdOf<T>,
             amount: AssetBalanceOf<T>,
         ) -> DispatchResult {
-            let pool_account_id = T::PalletId::get().into_account_truncating();
-
             
             T::Fungibles::transfer(
                 asset_id,
                 sender,
-                &pool_account_id,
+                &Self::pallet_account_id(),
                 amount,
                 Preservation::Expendable,
             )?;
@@ -420,6 +474,48 @@ pub mod pallet {
                 .ok_or(Error::<T>::DivisionByZero)?;
 
             Ok((amount_a, amount_b))
+        }
+
+        fn transfer_asset_from_user(
+            user: &AccountIdOf<T>,
+            asset_id: AssetIdOf<T>,
+            amount: AssetBalanceOf<T>,
+        ) -> DispatchResult {
+            T::Fungibles::transfer(
+                asset_id,
+                user,
+                &Self::pallet_account_id(),
+                amount,
+                Preservation::Expendable,
+            )?;
+            Ok(())
+        }
+
+        fn transfer_asset_to_user(
+            user: &AccountIdOf<T>,
+            asset_id: AssetIdOf<T>,
+            amount: AssetBalanceOf<T>,
+        ) -> DispatchResult {
+            T::Fungibles::transfer(
+                asset_id,
+                &Self::pallet_account_id(),
+                user,
+                amount,
+                Preservation::Expendable,
+            )?;
+            Ok(())
+        }
+
+        
+        fn get_trading_pair(
+            asset_a: AssetIdOf<T>,
+            asset_b: AssetIdOf<T>,
+        ) -> (AssetIdOf<T>, AssetIdOf<T>) {
+            if asset_a < asset_b {
+                (asset_a, asset_b)
+            } else {
+                (asset_b, asset_a)
+            }
         }
     }
 }
